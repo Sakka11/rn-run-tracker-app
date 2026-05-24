@@ -32,9 +32,16 @@ export default function Run() {
   // State pull-to-refresh
   const [refreshing, setRefreshing] = React.useState(false);
 
-  // อนิเมชันคลื่นเรดาร์รอบปุ่ม + (2 วงเหลื่อมเวลากันครึ่งรอบ ให้ต่อเนื่องลื่น)
+  // อนิเมชันคลื่นเรดาร์รอบปุ่ม +
   const wave1 = React.useRef(new Animated.Value(0)).current;
   const wave2 = React.useRef(new Animated.Value(0)).current;
+
+  // ลูกศรขยับ
+  const trendMove = React.useRef(new Animated.Value(0)).current;
+
+  // เท้าซ้าย / ขวา
+  const leftFoot = React.useRef(new Animated.Value(1)).current;
+  const rightFoot = React.useRef(new Animated.Value(0.25)).current;
 
   React.useEffect(() => {
     const DURATION = 2400;
@@ -54,7 +61,6 @@ export default function Run() {
 
     loop1.start();
 
-    // วงที่ 2 เริ่มช้ากว่าครึ่งรอบ → คลื่นไหลต่อเนื่องไม่ขาดช่วง
     const timer = setTimeout(() => loop2.start(), DURATION / 2);
 
     return () => {
@@ -64,7 +70,65 @@ export default function Run() {
     };
   }, [wave1, wave2]);
 
-  // แปลงค่าเป็น scale + opacity (จางเข้าเร็ว แล้วค่อยจางออก = ไม่มีป๊อป)
+  React.useEffect(() => {
+    // ลูกศรเด้งขึ้น
+    Animated.loop(
+      Animated.sequence([
+        Animated.timing(trendMove, {
+          toValue: -4,
+          duration: 700,
+          easing: Easing.inOut(Easing.ease),
+          useNativeDriver: true,
+        }),
+
+        Animated.timing(trendMove, {
+          toValue: 0,
+          duration: 700,
+          easing: Easing.inOut(Easing.ease),
+          useNativeDriver: true,
+        }),
+      ]),
+    ).start();
+
+    // เท้าซ้าย / ขวา สลับกัน
+    Animated.loop(
+      Animated.sequence([
+        Animated.parallel([
+          Animated.timing(leftFoot, {
+            toValue: 0.25,
+            duration: 320,
+            easing: Easing.linear,
+            useNativeDriver: true,
+          }),
+
+          Animated.timing(rightFoot, {
+            toValue: 1,
+            duration: 320,
+            easing: Easing.linear,
+            useNativeDriver: true,
+          }),
+        ]),
+
+        Animated.parallel([
+          Animated.timing(leftFoot, {
+            toValue: 1,
+            duration: 320,
+            easing: Easing.linear,
+            useNativeDriver: true,
+          }),
+
+          Animated.timing(rightFoot, {
+            toValue: 0.25,
+            duration: 320,
+            easing: Easing.linear,
+            useNativeDriver: true,
+          }),
+        ]),
+      ]),
+    ).start();
+  }, []);
+
+  // แปลงค่าเป็น scale + opacity
   const ringScale = (value: Animated.Value) =>
     value.interpolate({
       inputRange: [0, 1],
@@ -93,8 +157,6 @@ export default function Run() {
     setRefreshing(false);
   }, []);
 
-  // ดึงข้อมูลใหม่ทุกครั้งที่เข้ามาหน้านี้ (รวมตอนเปิดครั้งแรก และตอนกดบันทึกที่หน้า add แล้ว router.back() กลับมา)
-  // ทำให้รายการอัปเดต Realtime (useFocusEffect) + Supabase Realtime เพื่อให้มันขึ้นอัตโนมัติโดยที่ อีกเครื่องไม่ต้อง รีเฟรชจอ
   useFocusEffect(
     React.useCallback(() => {
       fetchRuns();
@@ -108,7 +170,6 @@ export default function Run() {
         "postgres_changes",
         { event: "INSERT", schema: "public", table: "runs" },
         (payload) => {
-          // เพิ่มข้อมูลใหม่ขึ้นบนสุด (กันซ้ำด้วย id เผื่อ useFocusEffect ดึงมาแล้ว)
           setRuns((prev) => {
             const incoming = payload.new as Runs;
 
@@ -124,7 +185,6 @@ export default function Run() {
         "postgres_changes",
         { event: "UPDATE", schema: "public", table: "runs" },
         (payload) => {
-          // อัปเดตแถวที่ถูกแก้ไข
           const updated = payload.new as Runs;
 
           setRuns((prev) =>
@@ -136,7 +196,6 @@ export default function Run() {
         "postgres_changes",
         { event: "DELETE", schema: "public", table: "runs" },
         (payload) => {
-          // เอาแถวที่ถูกลบออก
           const removed = payload.old as Runs;
 
           setRuns((prev) => prev.filter((r) => r.id !== removed.id));
@@ -144,13 +203,12 @@ export default function Run() {
       )
       .subscribe();
 
-    // ยกเลิกการ subscribe เมื่อออกจากหน้าจอ
     return () => {
       supabase.removeChannel(channel);
     };
   }, []);
 
-  // แปลงวันที่ (YYYY-MM-DD) เป็นรูปแบบไทย "
+  // แปลงวันที่
   const formatThaiDate = (dateStr: string) => {
     const thaiMonths = [
       "มกราคม",
@@ -176,7 +234,7 @@ export default function Run() {
     return `${day} ${thaiMonths[month - 1]} พ.ศ. ${year + 543}`;
   };
 
-  // กดเพื่อไปหน้ารายละเอียด
+  // เปิดหน้ารายละเอียด
   const openDetail = (item: Runs) => {
     router.push({
       pathname: "/[id]",
@@ -193,13 +251,13 @@ export default function Run() {
 
   // สรุปสถิติ
   const totalRuns = runs.length;
-  // ปิดการใช้งานชั่วคราว: ระยะทางรวม ** เดี๋ยวค่อยเปิด เดี๋ยวไม่เหมือนตาม Mockup รอใส่ตอนเสร็จทีเดียว เพื่อความสวยงาม 55555 **
-  // const totalDistance = runs.reduce(
-  //   (sum, item) => sum + (Number(item.distance) || 0),
-  //   0,
-  // );
 
-  // ส่วนหัว: โลโก้ + สรุปสถิติ
+  const totalDistance = runs.reduce(
+    (sum, item) => sum + (Number(item.distance) || 0),
+    0,
+  );
+
+  // Header
   const ListHeader = (
     <View>
       <Image
@@ -207,16 +265,34 @@ export default function Run() {
         style={styles.runlogo}
       />
 
-      {/* ----- ปิดการใช้งานชั่วคราว ** : สรุปสถิติ (ครั้งที่วิ่ง / ระยะทางรวม)  -----
+      {/* สรุปสถิติ */}
       <LinearGradient
         colors={["#3a7bff", "#6c4cff"]}
         start={{ x: 0, y: 0 }}
         end={{ x: 1, y: 1 }}
         style={styles.statCard}
       >
+        {/* ครั้งที่วิ่ง */}
         <View style={styles.statItem}>
           <View style={styles.statIcon}>
-            <Ionicons name="footsteps" size={20} color="#fff" />
+            <Animated.View
+              style={{
+                transform: [
+                  {
+                    translateY: trendMove,
+                  },
+
+                  {
+                    scale: trendMove.interpolate({
+                      inputRange: [-4, 0],
+                      outputRange: [1.08, 1],
+                    }),
+                  },
+                ],
+              }}
+            >
+              <Ionicons name="trending-up" size={20} color="#ff4d4f" />
+            </Animated.View>
           </View>
 
           <Text style={styles.statValue}>{totalRuns}</Text>
@@ -226,9 +302,59 @@ export default function Run() {
 
         <View style={styles.statDivider} />
 
+        {/* ระยะทางรวม */}
         <View style={styles.statItem}>
           <View style={styles.statIcon}>
-            <Ionicons name="map" size={20} color="#fff" />
+            <View
+              style={{
+                flexDirection: "row",
+                alignItems: "center",
+                gap: 4,
+              }}
+            >
+              {/* เท้าซ้าย */}
+              <Animated.View
+                style={{
+                  opacity: leftFoot,
+
+                  transform: [
+                    {
+                      translateY: leftFoot.interpolate({
+                        inputRange: [0.25, 1],
+                        outputRange: [2, -2],
+                      }),
+                    },
+                  ],
+                }}
+              >
+                <Ionicons name="footsteps-outline" size={16} color="#fff" />
+              </Animated.View>
+
+              {/* เท้าขวา */}
+              <Animated.View
+                style={{
+                  opacity: rightFoot,
+
+                  transform: [
+                    {
+                      translateY: rightFoot.interpolate({
+                        inputRange: [0.25, 1],
+                        outputRange: [2, -2],
+                      }),
+                    },
+                  ],
+                }}
+              >
+                <Ionicons
+                  name="footsteps-outline"
+                  size={16}
+                  color="#fff"
+                  style={{
+                    transform: [{ scaleX: -1 }],
+                  }}
+                />
+              </Animated.View>
+            </View>
           </View>
 
           <Text style={styles.statValue}>{totalDistance.toFixed(1)}</Text>
@@ -236,7 +362,6 @@ export default function Run() {
           <Text style={styles.statLabel}>ระยะทางรวม (กม.)</Text>
         </View>
       </LinearGradient>
-      ----- จบส่วนที่ปิดการใช้งาน ----- */}
 
       <View style={styles.sectionRow}>
         <Text style={styles.sectionTitle}>สถานที่ไปวิ่ง</Text>
@@ -248,7 +373,7 @@ export default function Run() {
     </View>
   );
 
-  // ส่วนแต่ละรายการ
+  // render item
   const renderItem = ({ item }: { item: Runs }) => (
     <TouchableOpacity
       style={styles.card}
@@ -284,6 +409,7 @@ export default function Run() {
       {loading ? (
         <View style={styles.loadingBox}>
           <ActivityIndicator size="large" color="#1f6fff" />
+
           <Text style={styles.loadingText}>กำลังโหลดข้อมูล...</Text>
         </View>
       ) : (
@@ -305,21 +431,10 @@ export default function Run() {
               }}
             />
           }
-          ListEmptyComponent={
-            <View style={styles.emptyBox}>
-              <Ionicons name="walk-outline" size={56} color="#c4cede" />
-
-              <Text style={styles.emptyTitle}>ยังไม่มีข้อมูลการวิ่ง</Text>
-
-              <Text style={styles.emptyText}>
-                กดปุ่ม + ด้านล่างเพื่อเพิ่มรายการแรกของคุณ
-              </Text>
-            </View>
-          }
         />
       )}
 
-      {/* ปุ่มเปิดไปหน้าจอ /add (มีคลื่นกระเพื่อม เรด้าแบบสวยๆ แอคๆ) */}
+      {/* FAB */}
       <View style={styles.fabWrap} pointerEvents="box-none">
         <Animated.View
           style={[
@@ -391,19 +506,19 @@ const styles = StyleSheet.create({
     paddingBottom: 130,
   },
 
-  // สรุปสถิติ
   statCard: {
     flexDirection: "row",
-    borderRadius: 24,
-    paddingVertical: 22,
+    borderRadius: 18,
+    paddingVertical: 14,
     marginTop: 8,
-    marginBottom: 24,
+    marginBottom: 20,
 
     shadowColor: "#6c4cff",
     shadowOffset: {
       width: 0,
       height: 10,
     },
+
     shadowOpacity: 0.35,
     shadowRadius: 18,
 
@@ -416,35 +531,34 @@ const styles = StyleSheet.create({
   },
 
   statIcon: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
+    width: 34,
+    height: 34,
+    borderRadius: 17,
     alignItems: "center",
     justifyContent: "center",
     marginBottom: 8,
-    backgroundColor: "rgba(255, 255, 255, 0.22)",
+    backgroundColor: "rgba(255,255,255,0.22)",
   },
 
   statValue: {
     fontFamily: "Kanit_700Bold",
-    fontSize: 24,
+    fontSize: 20,
     color: "#fff",
   },
 
   statLabel: {
     fontFamily: "Kanit_400Regular",
     fontSize: 13,
-    color: "rgba(255, 255, 255, 0.85)",
+    color: "rgba(255,255,255,0.85)",
     marginTop: 2,
   },
 
   statDivider: {
     width: 1,
-    backgroundColor: "rgba(255, 255, 255, 0.28)",
+    backgroundColor: "rgba(255,255,255,0.28)",
     marginVertical: 6,
   },
 
-  // ส่วนหัวรายการ
   sectionRow: {
     flexDirection: "row",
     alignItems: "center",
@@ -471,7 +585,6 @@ const styles = StyleSheet.create({
     color: "#1f6fff",
   },
 
-  // ส่วนรายการ
   card: {
     flexDirection: "row",
     alignItems: "center",
@@ -485,6 +598,7 @@ const styles = StyleSheet.create({
       width: 0,
       height: 6,
     },
+
     shadowOpacity: 0.08,
     shadowRadius: 12,
 
@@ -548,29 +662,6 @@ const styles = StyleSheet.create({
     marginLeft: 8,
   },
 
-  // สถานะว่าง
-  emptyBox: {
-    alignItems: "center",
-    marginTop: 50,
-    paddingHorizontal: 30,
-  },
-
-  emptyTitle: {
-    fontFamily: "Kanit_700Bold",
-    fontSize: 17,
-    color: "#5a6478",
-    marginTop: 14,
-  },
-
-  emptyText: {
-    fontFamily: "Kanit_400Regular",
-    fontSize: 14,
-    textAlign: "center",
-    color: "#9aa3b5",
-    marginTop: 4,
-  },
-
-  // ปุ่มเพิ่ม (+) พร้อมคลื่นเรดาร์ เก๋ๆ
   fabWrap: {
     position: "absolute",
     bottom: 60,
@@ -599,6 +690,7 @@ const styles = StyleSheet.create({
       width: 0,
       height: 8,
     },
+
     shadowOpacity: 0.45,
     shadowRadius: 12,
 
